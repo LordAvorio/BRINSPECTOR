@@ -25,7 +25,7 @@ Proyek greenfield: repo baru berisi `docs/DESIGN.md` (design system "Cyber Diagn
  |   redact --> classify --> trigger? --> captureVisibleTab                        |
  |      |                                                                          |
  |      v                                                                          |
- |   IndexedDB (event, body, screenshot)  +  storage.session (meta sesi)           |
+ |   IndexedDB (sesi, event, body, screenshot)                                     |
  |                                                                                 |
  |   Generate: pilih & potong data --> Foundry (structured output) --> PDF         |
  +---------------------------------------------------------------------------------+
@@ -55,12 +55,12 @@ Content script di MAIN world (didaftarkan dengan `chrome.scripting.registerConte
 - **Konsekuensi**: request sebelum script aktif tidak tertangkap, maka prompt reload saat monitoring pertama kali dinyalakan (lihat D3).
 
 ### D2. Bridge MAIN → ISOLATED → service worker dengan nonce
-MAIN world tidak punya akses `chrome.runtime`, jadi event dikirim via `window.postMessage` ke script ISOLATED, lalu diteruskan dengan `chrome.runtime.sendMessage`. Script ISOLATED membuat nonce acak per halaman dan menyerahkannya ke MAIN world saat inisialisasi; pesan tanpa nonce yang cocok atau dengan bentuk tidak valid dibuang.
-- **Alternatif**: `CustomEvent` di DOM — sama-sama bisa dipalsukan oleh halaman, tidak lebih aman.
+MAIN world tidak punya akses `chrome.runtime`, jadi event dikirim ke script ISOLATED lewat `CustomEvent` di `document`, lalu diteruskan dengan `chrome.runtime.sendMessage`. Saat `document_start` (sebelum skrip halaman mana pun berjalan), script MAIN membuat nama channel acak (nonce), menyimpan referensi asli `dispatchEvent`/`addEventListener`, lalu melakukan handshake; relay hanya menerima handshake pertama. Detail event berupa string JSON dan divalidasi skemanya di relay maupun di background; yang tidak valid dibuang.
+- **Alternatif**: `window.postMessage` — bisa diamati oleh listener `message` milik halaman sehingga nonce bocor.
 - **Catatan**: halaman tetap bisa memalsukan event karena berbagi MAIN world; nonce mencegah spam dari skrip pihak ketiga yang tidak tahu protokolnya, bukan jaminan penuh. Data capture selalu diperlakukan sebagai input tidak tepercaya (D10).
 
 ### D3. Opt-in per origin dengan izin dinamis
-`optional_host_permissions` + `chrome.permissions.request` untuk origin persis dari tab aktif, dipanggil dari klik toggle di popup (user gesture). Setelah izin diberikan, content script didaftarkan untuk origin itu dan popup menawarkan reload. Mematikan toggle mencabut registrasi script dan izin (`chrome.permissions.remove`). Daftar origin disimpan di `chrome.storage.local`.
+`optional_host_permissions` + `chrome.permissions.request` untuk origin persis dari tab aktif, dipanggil dari klik toggle di popup (user gesture). Setelah izin diberikan, content script didaftarkan untuk origin itu dan popup menawarkan reload. Mematikan toggle mencabut izin (`chrome.permissions.remove`) dan registrasi script. Daftar origin yang dimonitor adalah izin host opsional yang sudah diberikan (`chrome.permissions.getAll`), sehingga tidak ada daftar terpisah yang bisa tidak sinkron; background menyinkronkan registrasi script saat install/startup dan pada `permissions.onAdded`/`onRemoved` (menangani popup yang tertutup saat dialog izin muncul).
 - **Alternatif**: host permission `<all_urls>` statis (menangkap situs pribadi tester, risiko privasi), daftar domain di Settings (lebih banyak friksi), hardcode domain (tidak fleksibel).
 
 ### D4. Klasifikasi berbasis status code saja
@@ -81,8 +81,8 @@ Nilai diganti penanda seperti `[REDACTED:card]`; jumlah redaksi dicatat per even
 - **Alternatif**: redaksi saat Generate — ditolak karena data mentah akan tersimpan di IndexedDB.
 
 ### D7. Penyimpanan dan siklus hidup sesi
-- `chrome.storage.session`: metadata sesi per tab (id, origin, status, hitungan).
-- IndexedDB (via wrapper kecil seperti Dexie/idb): event, body, screenshot (Blob).
+- IndexedDB (via Dexie): sesi, event (termasuk body), dan screenshot. Metadata sesi disimpan di store yang sama agar perubahan sesi dan event-nya bisa di-commit dalam satu transaksi.
+- Izin host Chrome: daftar origin yang dimonitor (bertahan lintas restart).
 - Setiap event langsung ditulis (tidak di-buffer di memori) karena service worker dapat dihentikan.
 
 State sesi:
@@ -96,7 +96,7 @@ State sesi:
 Ring buffer per sesi: ~300 event network, ~30 screenshot; yang tertua dibuang. Semua angka adalah konstanta yang mudah diubah.
 
 ### D8. AI: panggilan langsung ke Foundry dengan structured output
-Service worker memanggil endpoint chat completions Foundry via `fetch` (host Foundry ada di `host_permissions`, sehingga tidak terkena CORS). Endpoint, nama deployment, dan API key dibaca dari env saat build (`import.meta.env`). Response diminta dalam JSON schema, per item:
+Popup (halaman extension, berbagi IndexedDB dengan service worker) memanggil endpoint chat completions Foundry via `fetch` saat Generate Report (host Foundry ada di `host_permissions`, sehingga tidak terkena CORS), lalu membuat PDF di tempat yang sama karena pdfmake butuh DOM. Endpoint, nama deployment, dan API key dibaca dari env saat build (`import.meta.env`). Response diminta dalam JSON schema, per item:
 ```
 { issueId, isHiddenFailure, rootCause, suggestedFix, severity }
 ```
@@ -125,6 +125,7 @@ TypeScript + WXT (entrypoint MV3, content script MAIN world, HMR) untuk extensio
 - [Hidden failure bergantung pada kualitas AI] → sertakan body terpotong dan konteks request; tandai hasil AI sebagai saran, bukan vonis.
 - [Screenshot tidak tersedia saat tab tidak aktif] → event tetap tercatat dengan status `unavailable`; "Capture now" sebagai cadangan.
 - [Popup maks 800×600 dan tertutup saat klik halaman] → popup hanya viewer; seluruh capture berjalan di background.
+- [Popup ditutup saat Generate Report sedang berjalan] → proses dibatalkan tanpa merusak data sesi; tester cukup membuka popup dan menekan Generate lagi.
 - [Request awal terlewat saat monitoring pertama kali aktif] → prompt reload.
 
 ## Open Questions

@@ -1,0 +1,28 @@
+# Ignore documentation and text assets
+*.md
+*.txt
+*.pdf
+*.html
+
+# Ignore images, diagrams, and video walkthroughs
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.mp4
+*.wav
+
+# Ignore config and infrastructure files (which sometimes trigger semantic parsing)
+*.yaml
+*.yml
+*.json
+*.toml
+
+# Ignore generated build artifacts and test output (contain minified code that pollutes the graph)
+playwright-report/
+test-results/
+coverage/
+graphify-out/
+
+# Ignore HTML files (build output, reports)
+*.html

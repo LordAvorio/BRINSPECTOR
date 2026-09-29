@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# WXT build output and generated files
+.output/
+.wxt/
+
+# Local env files hold the AI key - never commit them
+.env
+.env.*
+!.env.example
+
+# Misc
+*.log
+.DS_Store
+coverage/
